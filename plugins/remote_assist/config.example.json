@@ -1,0 +1,50 @@
+{
+  "telegram": {
+    "enabled": false,
+    "bot_token": "YOUR_TELEGRAM_BOT_TOKEN_HERE",
+    "chat_id": "YOUR_NOTIFICATION_CHAT_OR_CHANNEL_ID",
+    "allowed_user_ids": [
+      123456789
+    ],
+    "user_mappings": {
+      "123456789": "hernan"
+    },
+    "default_owner": "admin",
+    "send_media_file": false,
+    "max_media_size_mb": 50,
+    "notify_on_complete": true,
+    "notify_on_error": true
+  },
+  "presets": {
+    "owner_username": "admin",
+    "default_quality": "1080p",
+    "default_format": "video",
+    "target_cloud": "auto",
+    "auto_upload_on_complete": true
+  },
+  "whatsapp": {
+    "enabled": false,
+    "provider": "evolution_api",
+    "api_url": "http://localhost:8080/message/sendText/my_instance",
+    "api_key": "YOUR_EVOLUTION_API_KEY",
+    "recipient_number": "5491112345678",
+    "notify_on_complete": true,
+    "notify_on_error": true
+  },
+  "discord_webhook": {
+    "enabled": false,
+    "webhook_url": "https://discord.com/api/webhooks/YOUR/WEBHOOK/URL",
+    "notify_on_complete": true,
+    "notify_on_error": true
+  },
+  "cloud_upload": {
+    "enabled": true,
+    "target": "auto",
+    "auto_upload_on_complete": true
+  },
+  "general": {
+    "download_quality_default": "best",
+    "server_public_url": "",
+    "log_level": "INFO"
+  }
+}

@@ -1,0 +1,25 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Configuración privada y credenciales
+plugins/remote_assist/config.json
+plugins/remote_assist/whitelist.json
+plugins/remote_assist/incoming_files/
+incoming_files/
+config.json
+whitelist.json
+
+# Entornos virtuales y dependencias
+.venv/
+venv/
+ENV/
+env/
+
+# Logs y temporales
+*.log
+scratch/
+.pytest_cache/
+.coverage
+htmlcov/

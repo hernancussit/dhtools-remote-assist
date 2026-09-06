@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>dHtools - Asistente Delegado Remote Assist</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('remote_assist.static', filename='css/style.css') }}">
+</head>
+<body>
+  <div class="app-layout">
+    <!-- Header -->
+    <header class="top-header">
+      <div class="brand">
+        <div class="logo-icon">📡</div>
+        <div class="brand-text">
+          <h1>Remote Assist</h1>
+          <span class="badge-experimental">Asistente Delegado dHtools v{{ status.version }}</span>
+        </div>
+      </div>
+      <div class="header-status">
+        <div class="status-summary-pill">
+          <span class="pulse-dot {{ 'online' if status.telegram_running else 'offline' }}"></span>
+          <span>Bot Telegram: <b>{{ ('@' + status.bot_username) if status.bot_username else ('En línea' if status.telegram_running else 'Desconectado') }}</b></span>
+        </div>
+        <div class="status-summary-pill">
+          <span>Invitados autorizados: <b>{{ status.authorized_users_count }}</b></span>
+        </div>
+        <div class="status-summary-pill">
+          <span>Rama: <b>{{ status.branch }}</b></span>
+          <button id="btn-check-update" class="btn btn-outline" style="padding: 2px 8px; font-size: 0.75rem; margin-left: 6px;">
+            🔄 Actualizaciones
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main-content">
+
+      <!-- Sección 1: Presets de Descarga y Nube del Dueño -->
+      <section class="config-section glass-card">
+        <div class="section-title">
+          <span class="section-icon">⚙️</span>
+          <div>
+            <h2>Presets de Descarga y Almacenamiento</h2>
+            <p class="subtitle">Estos parámetros se aplicarán automáticamente cada vez que un invitado envíe un enlace por Telegram.</p>
+          </div>
+        </div>
+
+        <form id="presets-form" class="presets-grid">
+          <div class="form-group">
+            <label for="owner_username">Usuario dHtools (Dueño de la nube)</label>
+            <input type="text" id="owner_username" class="form-control font-mono" value="{{ presets.owner_username or 'admin' }}" required>
+            <small>Las descargas y nubes se asignarán a esta cuenta.</small>
+          </div>
+
+          <div class="form-group">
+            <label for="default_quality">Calidad Predeterminada</label>
+            <select id="default_quality" class="form-control">
+              <option value="best" {{ 'selected' if presets.default_quality == 'best' }}>Mejor disponible (Best)</option>
+              <option value="1080p" {{ 'selected' if presets.default_quality == '1080p' }}>1080p Full HD</option>
+              <option value="720p" {{ 'selected' if presets.default_quality == '720p' }}>720p HD</option>
+              <option value="480p" {{ 'selected' if presets.default_quality == '480p' }}>480p SD</option>
+              <option value="audio_320" {{ 'selected' if presets.default_quality == 'audio_320' }}>Audio MP3 (320 kbps)</option>
+            </select>
+            <small>Resolución fija para todo el contenido descargado.</small>
+          </div>
+
+          <div class="form-group">
+            <label for="default_format">Formato Predeterminado</label>
+            <select id="default_format" class="form-control">
+              <option value="video" {{ 'selected' if presets.default_format == 'video' }}>Video (MP4 / MKV)</option>
+              <option value="audio" {{ 'selected' if presets.default_format == 'audio' }}>Solo Audio (MP3 / M4A)</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="target_cloud">Nube Destino de Subida</label>
+            <select id="target_cloud" class="form-control">
+              <option value="auto" {{ 'selected' if presets.target_cloud == 'auto' }}>Automático (Primer proveedor activo)</option>
+              {% for cloud in available_clouds %}
+                <option value="{{ cloud }}" {{ 'selected' if presets.target_cloud == cloud }}>{{ cloud|capitalize }}</option>
+              {% endfor %}
+            </select>
+            <small>{{ available_clouds|length }} proveedor(es) activo(s) en tu cuenta de dHtools.</small>
+          </div>
+
+          <div class="form-group full-width checkbox-row">
+            <label class="switch-label">
+              <input type="checkbox" id="auto_upload" {{ 'checked' if presets.auto_upload_on_complete else '' }}>
+              <span class="switch-text">Subir a la nube automáticamente al completarse la descarga y confirmar al invitado.</span>
+            </label>
+          </div>
+
+          <div class="form-actions full-width">
+            <button type="submit" id="btn-save-presets" class="btn btn-primary">
+              💾 Guardar Presets de Descarga
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <!-- Sección 2: Invitaciones y Lista Blanca -->
+      <section class="access-section glass-card">
+        <div class="section-title-between">
+          <div class="section-title">
+            <span class="section-icon">🎟️</span>
+            <div>
+              <h2>Invitaciones Privadas y Lista Blanca</h2>
+              <p class="subtitle">El bot solo atiende a quienes autorices mediante enlace. Búsquedas y scrapers son bloqueados al 100%.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Generador de Enlaces -->
+        <div class="invite-generator-box">
+          <div class="generator-inputs">
+            <input type="text" id="invite-note" class="form-control" placeholder="Etiqueta / Nota (Ej: Para María, Amigo del trabajo...)">
+            <select id="invite-uses" class="form-control" style="max-width: 170px;">
+              <option value="1">1 Solo Uso</option>
+              <option value="3">3 Usos</option>
+              <option value="10">10 Usos</option>
+              <option value="999">Ilimitado</option>
+            </select>
+            <button id="btn-create-invite" class="btn btn-primary">
+              ✨ Crear Enlace
+            </button>
+          </div>
+
+          <!-- Caja de Enlace Generado -->
+          <div id="invite-result-box" class="invite-result-box hidden">
+            <div class="invite-url-wrapper">
+              <span class="url-label">Enlace de Acceso:</span>
+              <input type="text" id="generated-url" class="form-control font-mono" readonly>
+              <button id="btn-copy-url" class="btn btn-secondary">📋 Copiar</button>
+            </div>
+            <p class="invite-hint">Envía este enlace a tu invitado. Al hacer clic y pulsar <b>Iniciar</b> en Telegram quedará autorizado de inmediato.</p>
+          </div>
+        </div>
+
+        <!-- Tabla de Usuarios Autorizados -->
+        <div class="users-table-header">
+          <h3>Usuarios Autorizados</h3>
+        </div>
+
+        <div class="table-responsive">
+          <table class="users-table">
+            <thead>
+              <tr>
+                <th>Usuario</th>
+                <th>Telegram ID</th>
+                <th>Fecha de Autorización</th>
+                <th>Estado</th>
+                <th style="text-align: right;">Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="users-table-body">
+              {% if authorized_users %}
+                {% for user in authorized_users %}
+                  <tr data-user-id="{{ user.user_id }}">
+                    <td>
+                      <div class="user-cell">
+                        <span class="user-avatar">👤</span>
+                        <div>
+                          <div class="user-name">{{ user.first_name }}</div>
+                          <div class="user-username">{{ ('@' + user.username) if user.username else 'Sin alias' }}</div>
+                        </div>
+                      </div>
+                    </td>
+                    <td class="font-mono">{{ user.user_id }}</td>
+                    <td class="text-muted">{{ user.authorized_at[:10] if user.authorized_at else '-' }}</td>
+                    <td>
+                      <span class="status-pill {{ 'active' if user.status == 'active' else 'danger' }}">
+                        {{ 'Autorizado' if user.status == 'active' else 'Revocado' }}
+                      </span>
+                    </td>
+                    <td style="text-align: right;">
+                      {% if user.status == 'active' %}
+                        <button class="btn btn-danger-outline btn-revoke" data-user-id="{{ user.user_id }}">
+                          🚫 Revocar
+                        </button>
+                      {% else %}
+                        <span class="text-muted text-sm">Acceso bloqueado</span>
+                      {% endif %}
+                    </td>
+                  </tr>
+                {% endfor %}
+              {% else %}
+                <tr id="empty-row">
+                  <td colspan="5" class="empty-state">
+                    No hay invitados registrados todavía. Genera un enlace arriba para autorizar a tu primer contacto.
+                  </td>
+                </tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Sección 3: Resumen de Servicios Multi-Canal -->
+      <section class="cards-grid">
+        <div class="card glass-card">
+          <div class="card-header">
+            <div class="card-title">
+              <span class="service-icon telegram">✈️</span>
+              <h3>Segundo Bot Telegram</h3>
+            </div>
+            <span class="status-pill {{ 'active' if status.telegram_running else 'inactive' }}">
+              {{ 'Activo' if status.telegram_running else 'Inactivo' }}
+            </span>
+          </div>
+          <p class="service-desc">Escucha enlaces de invitados en segundo plano y entrega confirmaciones.</p>
+          <div class="card-footer">
+            <button class="btn btn-secondary btn-test" data-channel="telegram">Probar Telegram</button>
+          </div>
+        </div>
+
+        <div class="card glass-card">
+          <div class="card-header">
+            <div class="card-title">
+              <span class="service-icon whatsapp">💬</span>
+              <h3>WhatsApp</h3>
+            </div>
+            <span class="status-pill {{ 'active' if status.whatsapp_enabled else 'inactive' }}">
+              {{ 'Activo' if status.whatsapp_enabled else 'Inactivo' }}
+            </span>
+          </div>
+          <p class="service-desc">Notificaciones administrativas a tu WhatsApp personal.</p>
+          <div class="card-footer">
+            <button class="btn btn-secondary btn-test" data-channel="whatsapp">Probar WhatsApp</button>
+          </div>
+        </div>
+
+        <div class="card glass-card">
+          <div class="card-header">
+            <div class="card-title">
+              <span class="service-icon discord">🎮</span>
+              <h3>Discord / Webhook</h3>
+            </div>
+            <span class="status-pill {{ 'active' if status.discord_enabled else 'inactive' }}">
+              {{ 'Activo' if status.discord_enabled else 'Inactivo' }}
+            </span>
+          </div>
+          <p class="service-desc">Alertas enriquecidas enviadas a canales de Discord.</p>
+          <div class="card-footer">
+            <button class="btn btn-secondary btn-test" data-channel="discord">Probar Discord</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Toast Flotante -->
+      <div id="toast" class="toast hidden"></div>
+    </main>
+  </div>
+
+  <script src="{{ url_for('remote_assist.static', filename='js/main.js') }}"></script>
+</body>
+</html>
