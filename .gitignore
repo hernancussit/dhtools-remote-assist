@@ -10,6 +10,8 @@ plugins/remote_assist/incoming_files/
 incoming_files/
 config.json
 whitelist.json
+.secret.key
+*.key
 
 # Entornos virtuales y dependencias
 .venv/

@@ -16,20 +16,22 @@ Todo el código está encapsulado estrictamente dentro de `plugins/remote_assist
 plugins/remote_assist/
 ├── plugin.json                 # Manifiesto oficial del plugin (SDK v1.0.0)
 ├── plugin.py                   # Clase principal Plugin, hooks del ciclo de vida y navegación
-├── config.json                 # Configuración activa y presets del dueño (ignorado en git)
+├── config.json                 # Configuración activa cifrada en disco (ignorado en git)
 ├── config.example.json         # Plantilla documentada de configuración
 ├── whitelist.json              # Base de datos local de invitados y tokens (ignorado en git)
+├── .secret.key                 # Llave criptográfica AES-128 (ignorado estrictamente en git)
 ├── core/
 │   ├── __init__.py
+│   ├── crypto.py               # Cifrado simétrico en reposo (Fernet AES-128-CBC + HMAC-SHA256)
 │   ├── access_manager.py       # Gestor dinámico de invitaciones, whitelist y revocación
 │   ├── telegram_bot.py         # Bot autónomo (invitaciones, descargas y subida de archivos)
 │   ├── channels.py             # Notificaciones multi-canal (Telegram, WhatsApp, Discord)
 │   └── cloud_uploader.py       # Integración oficial: upload_job_to_cloud y upload_file_to_cloud
 ├── templates/
-│   └── index.html              # Panel web: Generador de links, gestión de lista blanca y presets
+│   └── index.html              # Panel web: Configuración cifrada del bot, presets y lista blanca
 └── static/
     ├── css/style.css           # Estilos modernos Dark-Mode / Glassmorphism
-    └── js/main.js              # Lógica para generar links, copiar al portapapeles y revocar
+    └── js/main.js              # Lógica para bot, guardar presets, generar links y revocar
 ```
 
 ---
@@ -37,7 +39,8 @@ plugins/remote_assist/
 ## 🔄 Flujo de Trabajo
 
 ```text
-1. [Dueño en dHtools Web]  ──>  Elige presets: 1080p, Video, Google Drive.
+1. [Dueño en dHtools Web]  ──>  Configura token y chat del bot (cifrados automáticamente con AES).
+                                Elige presets: 1080p, Video, Google Drive.
                                 Genera enlace: https://t.me/TuBot?start=inv_abc123
 
 2. [Invitado en Telegram]   ──>  Hace clic en el enlace y pulsa "Iniciar".
@@ -56,6 +59,16 @@ plugins/remote_assist/
 
 ---
 
+## 🔒 Cifrado Seguro de Credenciales en Reposo
+
+El plugin implementa un estándar estricto de seguridad para almacenar tokens y credenciales de Telegram:
+* **Cifrado Simétrico AES-128-CBC + HMAC-SHA256 (`Fernet`):** Los campos sensibles (`bot_token`, `chat_id`, etc.) nunca se guardan en texto claro en `config.json`. En su lugar, se almacenan con el prefijo `enc:<ciphertext_base64>`.
+* **Llave Criptográfica Local (`.secret.key`):** Generada automáticamente en el primer inicio y protegida contra exclusión accidental en `.gitignore`.
+* **Enmascaramiento en la Interfaz Web:** El token nunca se expone en texto plano en la vista HTML; se renderiza como `123456••••••••••••••••7890`. El usuario puede pulsar 👁️ para editarlo o conservarlo intacto sin revelar su valor real.
+* **Descifrado en Memoria RAM:** Las credenciales solo se descifran en memoria durante el ciclo de vida del proceso en tiempo de ejecución.
+
+---
+
 ## 🛡️ Seguridad Anti-Scraping y Anti-Búsquedas en Telegram
 
 1. **Sin Enlace = Sin Acceso:**  
@@ -71,16 +84,23 @@ plugins/remote_assist/
 ## ⚙️ Panel de Control Web (`/plugin/remote_assist/`)
 
 El plugin inyecta un acceso directo en el sidebar de dHtools. Desde el panel puedes:
-* **Configurar Presets del Dueño:**
+* **🤖 Configurar el Bot de Telegram:**
+  * Habilitar o detener el servicio en segundo plano.
+  * Ingresar o actualizar el API Token de @BotFather con visualización protegida y botón para mostrar/ocultar (👁️).
+  * Configurar ID de chat o canal para avisos administrativos.
+  * Habilitar reenvío de archivos al chat con límite configurable en megabytes (hasta 50 MB).
+  * Botón **"💾 Guardar y Reiniciar Bot"** (aplica cambios en caliente sin reiniciar dHtools).
+  * Botón **"🧪 Probar Conexión"** para validar el token y la comunicación con Telegram.
+* **⚙️ Configurar Presets del Dueño:**
   * Usuario de dHtools propietario de las descargas y la nube.
   * Calidad por defecto (`best`, `1080p`, `720p`, `480p`, `audio_320`).
   * Formato (`video`, `audio`).
   * Nube de destino (selecciona entre las nubes activas de tu usuario).
   * Auto-subida a la nube al terminar.
-* **Crear Enlaces de Invitación:**
+* **🎟️ Crear Enlaces de Invitación:**
   * Define una nota (ej: *"Para María"*) y el límite de usos (1 uso, 3 usos, ilimitado).
   * Botón para copiar el enlace generado con un clic.
-* **Gestionar la Lista Blanca:**
+* **👥 Gestionar la Lista Blanca:**
   * Tabla interactiva con el nombre del usuario de Telegram, su User ID y la fecha de ingreso.
   * Botón rojo **Revocar** para bloquear el acceso en cualquier momento.
 
@@ -88,12 +108,13 @@ El plugin inyecta un acceso directo en el sidebar de dHtools. Desde el panel pue
 
 ## 🧪 Pruebas Automatizadas
 
-Para validar toda la lógica de invitaciones, lista blanca, presets y descarga automática:
+Para validar toda la lógica de invitaciones, lista blanca, presets, cifrado seguro y descarga automática:
 ```bash
 python tests/test_plugin.py
 ```
 Resultado:
 ```text
-Ran 5 tests in 0.047s
+Ran 10 tests in 0.120s
 OK
 ```
+

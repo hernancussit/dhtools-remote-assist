@@ -17,11 +17,13 @@ try:
     from .core.channels import NotificationDispatcher
     from .core.cloud_uploader import CloudUploader
     from .core.access_manager import AccessManager
+    from .core.crypto import CryptoManager
 except (ImportError, ValueError):
     from core.telegram_bot import TelegramBot
     from core.channels import NotificationDispatcher
     from core.cloud_uploader import CloudUploader
     from core.access_manager import AccessManager
+    from core.crypto import CryptoManager
 
 logger = logging.getLogger("dHtools.Plugin.RemoteAssist")
 
@@ -39,6 +41,7 @@ class Plugin:
 
         self.plugin_dir = os.path.dirname(os.path.abspath(__file__))
         self.config_path = os.path.join(self.plugin_dir, "config.json")
+        self.crypto = CryptoManager(self.plugin_dir)
         self.config = self._load_config()
 
         # Gestor de accesos e invitaciones dinámicas
@@ -63,42 +66,47 @@ class Plugin:
     # -------------------------------------------------------------
 
     def _load_config(self) -> Dict[str, Any]:
-        """Loads configuration from config.json with fallback to defaults."""
+        """Loads configuration from config.json with fallback to defaults, decrypting sensitive fields in memory."""
+        raw_cfg: Dict[str, Any] = {}
         if os.path.exists(self.config_path):
             try:
                 with open(self.config_path, "r", encoding="utf-8") as f:
-                    return json.load(f)
+                    raw_cfg = json.load(f)
             except Exception as e:
                 logger.error("Error al leer config.json: %s", e)
+        else:
+            example_path = os.path.join(self.plugin_dir, "config.example.json")
+            if os.path.exists(example_path):
+                try:
+                    with open(example_path, "r", encoding="utf-8") as f:
+                        raw_cfg = json.load(f)
+                except Exception:
+                    pass
 
-        example_path = os.path.join(self.plugin_dir, "config.example.json")
-        if os.path.exists(example_path):
-            try:
-                with open(example_path, "r", encoding="utf-8") as f:
-                    return json.load(f)
-            except Exception:
-                pass
+        if not raw_cfg:
+            raw_cfg = {
+                "telegram": {"enabled": False, "bot_token": "", "chat_id": ""},
+                "presets": {
+                    "owner_username": "admin",
+                    "default_quality": "1080p",
+                    "default_format": "video",
+                    "target_cloud": "auto",
+                    "auto_upload_on_complete": True,
+                },
+                "whatsapp": {"enabled": False},
+                "discord_webhook": {"enabled": False},
+                "cloud_upload": {"enabled": True, "target": "auto", "auto_upload_on_complete": True},
+                "general": {"download_quality_default": "best"},
+            }
 
-        return {
-            "telegram": {"enabled": False, "bot_token": "", "chat_id": ""},
-            "presets": {
-                "owner_username": "admin",
-                "default_quality": "1080p",
-                "default_format": "video",
-                "target_cloud": "auto",
-                "auto_upload_on_complete": True,
-            },
-            "whatsapp": {"enabled": False},
-            "discord_webhook": {"enabled": False},
-            "cloud_upload": {"enabled": True, "target": "auto", "auto_upload_on_complete": True},
-            "general": {"download_quality_default": "best"},
-        }
+        return self.crypto.decrypt_config(raw_cfg)
 
     def _save_config(self) -> None:
-        """Saves current config dictionary to config.json."""
+        """Saves current in-memory config dictionary to config.json with sensitive fields encrypted at rest."""
         try:
+            encrypted_cfg = self.crypto.encrypt_config(self.config)
             with open(self.config_path, "w", encoding="utf-8") as f:
-                json.dump(self.config, f, indent=2, ensure_ascii=False)
+                json.dump(encrypted_cfg, f, indent=2, ensure_ascii=False)
         except Exception as e:
             logger.error("Error al escribir config.json: %s", e)
 
@@ -115,6 +123,25 @@ class Plugin:
         self.cloud_uploader.update_config(self.config)
         self.notifier.update_config(self.config)
         return self.config
+
+    def _restart_telegram_bot(self) -> None:
+        """Safely stops existing bot polling thread and restarts if enabled."""
+        try:
+            if self.telegram_bot:
+                self.telegram_bot.stop()
+        except Exception as e:
+            logger.warning("Aviso al detener bot de Telegram: %s", e)
+
+        if self.telegram_bot.is_enabled:
+            logger.info("Iniciando hilo worker del bot de Telegram con nueva configuración...")
+            self._telegram_thread = threading.Thread(
+                target=self.telegram_bot.start_polling,
+                name=f"{self.plugin_id}_telegram_worker",
+                daemon=True,
+            )
+            self._telegram_thread.start()
+        else:
+            logger.info("Bot de Telegram deshabilitado o sin token.")
 
     # -------------------------------------------------------------
     # Hooks del Ciclo de Vida de dHtools
@@ -153,6 +180,10 @@ class Plugin:
             users_list = self.access_manager.list_users()
             active_users = [u for u in users_list if u.get("status") == "active"]
 
+            tg_conf = self.config.get("telegram", {})
+            raw_token = tg_conf.get("bot_token", "")
+            masked_token = self.crypto.mask_token(raw_token) if raw_token else ""
+
             status_summary = {
                 "telegram_enabled": self.telegram_bot.is_enabled,
                 "telegram_running": self.telegram_bot.is_running,
@@ -170,6 +201,8 @@ class Plugin:
                 "index.html",
                 status=status_summary,
                 config=self.config,
+                telegram_conf=tg_conf,
+                masked_token=masked_token,
                 presets=self.config.get("presets", {}),
                 available_clouds=available_clouds,
                 authorized_users=users_list,
@@ -229,6 +262,77 @@ class Plugin:
         def api_reload():
             self.reload_config()
             return jsonify({"success": True, "message": "Configuración recargada."})
+
+        @bp.route("/api/bot-config/save", methods=["POST"])
+        def api_save_bot_config():
+            data = request.get_json() or {}
+            tg_conf = self.config.setdefault("telegram", {})
+
+            enabled = bool(data.get("enabled", False))
+            chat_id = str(data.get("chat_id", "")).strip()
+            token_input = str(data.get("bot_token", "")).strip()
+            send_media = bool(data.get("send_media_file", False))
+            max_media_size = int(data.get("max_media_size_mb", 50))
+
+            # Solo actualizar el token si no es el enmascarado y no está vacío
+            if token_input and "••••" not in token_input:
+                tg_conf["bot_token"] = token_input
+            elif not token_input and not tg_conf.get("bot_token"):
+                tg_conf["bot_token"] = ""
+
+            tg_conf["enabled"] = enabled
+            tg_conf["chat_id"] = chat_id
+            tg_conf["send_media_file"] = send_media
+            tg_conf["max_media_size_mb"] = max_media_size
+
+            # Guardar con cifrado en disco y recargar en memoria
+            self._save_config()
+            self.reload_config()
+
+            # Reiniciar worker del bot
+            self._restart_telegram_bot()
+
+            return jsonify({
+                "success": True,
+                "message": "Configuración del bot de Telegram guardada y cifrada en disco.",
+                "telegram_enabled": self.telegram_bot.is_enabled,
+                "telegram_running": self.telegram_bot.is_running,
+                "bot_username": self.telegram_bot.bot_username,
+                "masked_token": self.crypto.mask_token(tg_conf.get("bot_token", "")),
+            })
+
+        @bp.route("/api/test-channel", methods=["POST"])
+        def api_test_channel():
+            data = request.get_json() or {}
+            channel = data.get("channel", "telegram")
+
+            if channel == "telegram":
+                if not self.telegram_bot.bot_token:
+                    return jsonify({"success": False, "message": "Bot no configurado. Ingresa un token primero."}), 400
+
+                bot_info = self.telegram_bot.get_me()
+                if not bot_info:
+                    return jsonify({"success": False, "message": "No se pudo conectar con Telegram. Verifica que el token sea correcto."}), 400
+
+                username = bot_info.get("username", "Bot")
+                chat_id = self.config.get("telegram", {}).get("chat_id")
+                if chat_id:
+                    ok = self.telegram_bot.send_message(
+                        chat_id,
+                        f"🔔 <b>Remote Assist</b>: Conexión con @{username} exitosa y cifrado en reposo activo.",
+                    )
+                    if ok:
+                        return jsonify({"success": True, "message": f"Conectado como @{username} y mensaje enviado al chat {chat_id}."})
+                    return jsonify({"success": True, "message": f"Conectado como @{username}, pero no se pudo entregar mensaje al chat {chat_id}."})
+
+                return jsonify({"success": True, "message": f"Conectado con éxito a Telegram como @{username}."})
+
+            elif channel == "whatsapp":
+                return jsonify({"success": False, "message": "Canal WhatsApp no configurado aún."})
+            elif channel == "discord":
+                return jsonify({"success": False, "message": "Webhook de Discord no configurado aún."})
+
+            return jsonify({"success": False, "message": f"Canal '{channel}' desconocido."}), 400
 
         @bp.route("/api/check-update", methods=["GET"])
         def api_check_update():

@@ -60,6 +60,102 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // -------------------------------------------------------------
+  // 1.5. Configuración del Bot de Telegram (Cifrado en Reposo)
+  // -------------------------------------------------------------
+  const botConfigForm = document.getElementById('bot-config-form');
+  const btnToggleToken = document.getElementById('btn-toggle-token');
+  const botTokenInput = document.getElementById('bot_token');
+  const btnTestBot = document.getElementById('btn-test-bot');
+  const botStatusIndicator = document.getElementById('bot-status-indicator');
+
+  if (btnToggleToken && botTokenInput) {
+    btnToggleToken.addEventListener('click', () => {
+      if (botTokenInput.type === 'password') {
+        botTokenInput.type = 'text';
+        btnToggleToken.textContent = '🔒';
+      } else {
+        botTokenInput.type = 'password';
+        btnToggleToken.textContent = '👁️';
+      }
+    });
+  }
+
+  if (botConfigForm) {
+    botConfigForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById('btn-save-bot-config');
+      const originalText = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Guardando y Cifrando...';
+
+      const payload = {
+        enabled: document.getElementById('bot_enabled').checked,
+        bot_token: document.getElementById('bot_token').value,
+        chat_id: document.getElementById('bot_chat_id').value,
+        send_media_file: document.getElementById('send_media_file').checked,
+        max_media_size_mb: parseInt(document.getElementById('max_media_size').value, 10) || 50,
+      };
+
+      try {
+        const resp = await fetch('/plugin/remote_assist/api/bot-config/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+
+        const data = await resp.json();
+        if (resp.ok && data.success) {
+          showToast('🔒 ' + data.message, 'success');
+          if (data.masked_token) {
+            botTokenInput.value = data.masked_token;
+          }
+          if (botStatusIndicator) {
+            const statusText = data.bot_username 
+              ? `@${data.bot_username} (Conectado)` 
+              : (data.telegram_running ? 'Activo' : 'Detenido');
+            botStatusIndicator.innerHTML = `Estado: <b>${statusText}</b>`;
+          }
+        } else {
+          showToast(`❌ Error: ${data.message || 'No se pudo guardar la configuración'}`, 'error');
+        }
+      } catch (err) {
+        showToast(`❌ Error de red: ${err.message}`, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = originalText;
+      }
+    });
+  }
+
+  if (btnTestBot) {
+    btnTestBot.addEventListener('click', async () => {
+      const originalText = btnTestBot.textContent;
+      btnTestBot.disabled = true;
+      btnTestBot.textContent = 'Probando...';
+
+      try {
+        const resp = await fetch('/plugin/remote_assist/api/test-channel', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ channel: 'telegram' }),
+        });
+
+        const data = await resp.json();
+        if (resp.ok && data.success) {
+          showToast(`✅ ${data.message}`, 'success', 4500);
+        } else {
+          showToast(`❌ ${data.message || 'Error en la conexión con el bot'}`, 'error', 4500);
+        }
+      } catch (err) {
+        showToast(`❌ Error al conectar: ${err.message}`, 'error');
+      } finally {
+        btnTestBot.disabled = false;
+        btnTestBot.textContent = originalText;
+      }
+    });
+  }
+
+  // -------------------------------------------------------------
   // 2. Generar Enlace de Invitación
   // -------------------------------------------------------------
   if (btnCreateInvite) {

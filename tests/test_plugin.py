@@ -19,6 +19,7 @@ from plugins.remote_assist.plugin import Plugin
 from plugins.remote_assist.core.telegram_bot import TelegramBot
 from plugins.remote_assist.core.access_manager import AccessManager
 from plugins.remote_assist.core.cloud_uploader import CloudUploader
+from plugins.remote_assist.core.crypto import CryptoManager
 from flask import Flask
 
 
@@ -103,11 +104,34 @@ class TestRemoteAssistDelegatedAssistant(unittest.TestCase):
     def setUp(self):
         self.plugin_dir = os.path.join(WORKSPACE_ROOT, "plugins", "remote_assist")
         self.whitelist_file = os.path.join(self.plugin_dir, "whitelist.json")
+        self.config_file = os.path.join(self.plugin_dir, "config.json")
+        self.secret_key_file = os.path.join(self.plugin_dir, ".secret.key")
+
+        self.initial_config = None
+        if os.path.exists(self.config_file):
+            try:
+                with open(self.config_file, "r", encoding="utf-8") as f:
+                    self.initial_config = f.read()
+            except Exception:
+                pass
 
     def tearDown(self):
         if os.path.exists(self.whitelist_file):
             try:
                 os.remove(self.whitelist_file)
+            except Exception:
+                pass
+
+        if self.initial_config is not None:
+            try:
+                with open(self.config_file, "w", encoding="utf-8") as f:
+                    f.write(self.initial_config)
+            except Exception:
+                pass
+
+        if os.path.exists(self.secret_key_file):
+            try:
+                os.remove(self.secret_key_file)
             except Exception:
                 pass
 
@@ -301,6 +325,145 @@ class TestRemoteAssistDelegatedAssistant(unittest.TestCase):
         self.assertEqual(data.get("remote_version"), "1.0.1")
         self.assertEqual(data.get("current_version"), manifest["version"])
         self.assertEqual(data.get("branch"), manifest["branch"])
+
+    def test_07_crypto_manager_encryption_decryption_and_masking(self):
+        """Verifica que CryptoManager use AES-128-CBC + HMAC y maneje prefijos enc: y enmascarado."""
+        crypto = CryptoManager(self.plugin_dir)
+        raw_token = "123456789:ABCdefGHIjklMNOpqrsTUVwxyz123456"
+
+        # Cifrado
+        encrypted = crypto.encrypt(raw_token)
+        self.assertTrue(encrypted.startswith("enc:"))
+        self.assertNotEqual(encrypted, raw_token)
+
+        # Idempotencia: no volver a cifrar si ya tiene enc:
+        double_encrypted = crypto.encrypt(encrypted)
+        self.assertEqual(double_encrypted, encrypted)
+
+        # Descifrado
+        decrypted = crypto.decrypt(encrypted)
+        self.assertEqual(decrypted, raw_token)
+
+        # Diccionario con configuración
+        test_cfg = {
+            "telegram": {"bot_token": raw_token, "chat_id": "987654321"},
+            "presets": {"owner_username": "hernan"},
+        }
+        enc_cfg = crypto.encrypt_config(test_cfg)
+        self.assertTrue(enc_cfg["telegram"]["bot_token"].startswith("enc:"))
+        self.assertTrue(enc_cfg["telegram"]["chat_id"].startswith("enc:"))
+        self.assertEqual(enc_cfg["presets"]["owner_username"], "hernan")
+
+        dec_cfg = crypto.decrypt_config(enc_cfg)
+        self.assertEqual(dec_cfg["telegram"]["bot_token"], raw_token)
+        self.assertEqual(dec_cfg["telegram"]["chat_id"], "987654321")
+
+        # Enmascaramiento para la UI
+        masked = CryptoManager.mask_token(raw_token)
+        self.assertTrue(masked.startswith("123456"))
+        self.assertTrue(masked.endswith("3456"))
+        self.assertIn("••••", masked)
+        self.assertNotIn("ABCdefGHIjklMNOpqrsTUVwxyz", masked)
+
+    def test_08_plugin_config_encrypted_at_rest_on_disk(self):
+        """Verifica que al guardar la configuración con el plugin, los campos en config.json estén cifrados."""
+        mock_manager = MockPluginManager()
+        plugin = Plugin(manager=mock_manager, metadata={"id": "remote_assist", "version": "1.0.0"})
+
+        secret_token = "9988776655:SECRET_TOKEN_TELEGRAM_KEY"
+        secret_chat = "1122334455"
+        plugin.config["telegram"]["bot_token"] = secret_token
+        plugin.config["telegram"]["chat_id"] = secret_chat
+
+        # Guardar en disco
+        plugin._save_config()
+
+        # Inspeccionar config.json en disco en crudo
+        with open(plugin.config_path, "r", encoding="utf-8") as f:
+            raw_disk_content = f.read()
+            raw_json = json.loads(raw_disk_content)
+
+        # Asegurar que los tokens en disco están cifrados y el texto plano NO existe en el archivo
+        self.assertNotIn(secret_token, raw_disk_content)
+        self.assertTrue(raw_json["telegram"]["bot_token"].startswith("enc:"))
+        self.assertTrue(raw_json["telegram"]["chat_id"].startswith("enc:"))
+
+        # Al recargar, la memoria debe contener los valores descifrados transparentemente
+        reloaded = plugin._load_config()
+        self.assertEqual(reloaded["telegram"]["bot_token"], secret_token)
+        self.assertEqual(reloaded["telegram"]["chat_id"], secret_chat)
+
+    def test_09_api_save_bot_config_and_token_protection(self):
+        """Prueba la API /api/bot-config/save y la preservación del token cuando se envía enmascarado."""
+        app = Flask(__name__)
+        app.config["TESTING"] = True
+        mock_manager = MockPluginManager()
+        plugin = Plugin(manager=mock_manager, metadata={"id": "remote_assist", "version": "1.0.0"})
+        plugin.register_routes(app)
+        client = app.test_client()
+
+        # 1. Guardar nueva configuración de bot con token real
+        resp = client.post(
+            "/plugin/remote_assist/api/bot-config/save",
+            json={
+                "enabled": True,
+                "bot_token": "BOT_TOKEN_XYZ_123456789",
+                "chat_id": "777888",
+                "send_media_file": True,
+                "max_media_size_mb": 45,
+            },
+        )
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertTrue(data.get("success"))
+        self.assertIn("cifrada en disco", data.get("message"))
+        self.assertIn("••••", data.get("masked_token"))
+
+        # Verificar que en memoria está el token real
+        self.assertEqual(plugin.config["telegram"]["bot_token"], "BOT_TOKEN_XYZ_123456789")
+        self.assertEqual(plugin.config["telegram"]["max_media_size_mb"], 45)
+
+        # 2. Guardar modificaciones subsecuentes sin cambiar el token (enviando el valor enmascarado)
+        resp2 = client.post(
+            "/plugin/remote_assist/api/bot-config/save",
+            json={
+                "enabled": True,
+                "bot_token": data["masked_token"],  # El frontend reenvía el valor enmascarado
+                "chat_id": "999000",
+                "send_media_file": False,
+                "max_media_size_mb": 30,
+            },
+        )
+        self.assertEqual(resp2.status_code, 200)
+        # El token original NO debe haber sido pisado por los puntos
+        self.assertEqual(plugin.config["telegram"]["bot_token"], "BOT_TOKEN_XYZ_123456789")
+        self.assertEqual(plugin.config["telegram"]["chat_id"], "999000")
+        self.assertEqual(plugin.config["telegram"]["max_media_size_mb"], 30)
+
+    @patch.object(TelegramBot, "get_me")
+    def test_10_api_test_channel_telegram(self, mock_get_me):
+        """Prueba el endpoint /api/test-channel para verificar la conexión con Telegram."""
+        mock_get_me.return_value = {"username": "MiBotDePrueba", "id": 12345}
+
+        app = Flask(__name__)
+        app.config["TESTING"] = True
+        mock_manager = MockPluginManager()
+        plugin = Plugin(manager=mock_manager, metadata={"id": "remote_assist", "version": "1.0.0"})
+        plugin.register_routes(app)
+        client = app.test_client()
+
+        # Sin token configurado
+        plugin.telegram_bot.bot_token = ""
+        resp_fail = client.post("/plugin/remote_assist/api/test-channel", json={"channel": "telegram"})
+        self.assertEqual(resp_fail.status_code, 400)
+
+        # Con token y get_me mockeado
+        plugin.telegram_bot.bot_token = "VALID_TOKEN"
+        resp_ok = client.post("/plugin/remote_assist/api/test-channel", json={"channel": "telegram"})
+        self.assertEqual(resp_ok.status_code, 200)
+        data = resp_ok.get_json()
+        self.assertTrue(data.get("success"))
+        self.assertIn("@MiBotDePrueba", data.get("message"))
 
 
 if __name__ == "__main__":
