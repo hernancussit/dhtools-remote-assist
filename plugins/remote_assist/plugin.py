@@ -12,18 +12,11 @@ from typing import Dict, Any, Optional, List
 import requests
 from flask import Blueprint, render_template, jsonify, request
 
-try:
-    from .core.telegram_bot import TelegramBot
-    from .core.channels import NotificationDispatcher
-    from .core.cloud_uploader import CloudUploader
-    from .core.access_manager import AccessManager
-    from .core.crypto import CryptoManager
-except (ImportError, ValueError):
-    from core.telegram_bot import TelegramBot
-    from core.channels import NotificationDispatcher
-    from core.cloud_uploader import CloudUploader
-    from core.access_manager import AccessManager
-    from core.crypto import CryptoManager
+from .core.telegram_bot import TelegramBot
+from .core.channels import NotificationDispatcher
+from .core.cloud_uploader import CloudUploader
+from .core.access_manager import AccessManager
+from .core.crypto import CryptoManager
 
 logger = logging.getLogger("dHtools.Plugin.RemoteAssist")
 
