@@ -298,7 +298,7 @@ class TestRemoteAssistDelegatedAssistant(unittest.TestCase):
         """Verifica que plugin.json incluya repository y branch y que el endpoint /api/check-update funcione."""
         mock_resp = MagicMock()
         mock_resp.status_code = 200
-        mock_resp.json.return_value = {"version": "1.0.1"}
+        mock_resp.json.return_value = {"version": "2.0.0"}
         mock_get.return_value = mock_resp
 
         manifest_path = os.path.join(self.plugin_dir, "plugin.json")
@@ -322,7 +322,7 @@ class TestRemoteAssistDelegatedAssistant(unittest.TestCase):
         data = resp.get_json()
         self.assertTrue(data.get("success"))
         self.assertTrue(data.get("has_update"))
-        self.assertEqual(data.get("remote_version"), "1.0.1")
+        self.assertEqual(data.get("remote_version"), "2.0.0")
         self.assertEqual(data.get("current_version"), manifest["version"])
         self.assertEqual(data.get("branch"), manifest["branch"])
 
@@ -464,6 +464,33 @@ class TestRemoteAssistDelegatedAssistant(unittest.TestCase):
         data = resp_ok.get_json()
         self.assertTrue(data.get("success"))
         self.assertIn("@MiBotDePrueba", data.get("message"))
+
+    def test_11_dashboard_namespaced_template_no_collision(self):
+        """Verifica que el dashboard renderice su propia plantilla y no colisione con el index.html principal de dHtools."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as fake_app_templates:
+            with open(os.path.join(fake_app_templates, "index.html"), "w") as f:
+                f.write("<html><head><title>dHtools - Suite Multimedia</title></head><body>Descargas</body></html>")
+
+            app = Flask(__name__, template_folder=fake_app_templates)
+            app.config["TESTING"] = True
+            mock_manager = MockPluginManager()
+            plugin = Plugin(manager=mock_manager, metadata={"id": "remote_assist", "version": "1.0.0"})
+            plugin.register_routes(app)
+            client = app.test_client()
+
+            # Probar con /
+            resp_slash = client.get("/plugin/remote_assist/")
+            self.assertEqual(resp_slash.status_code, 200)
+            html_slash = resp_slash.get_data(as_text=True)
+            self.assertIn("Asistente Delegado Remote Assist", html_slash)
+            self.assertNotIn("dHtools - Suite Multimedia", html_slash)
+
+            # Probar sin /
+            resp_no_slash = client.get("/plugin/remote_assist")
+            self.assertEqual(resp_no_slash.status_code, 200)
+            html_no_slash = resp_no_slash.get_data(as_text=True)
+            self.assertIn("Asistente Delegado Remote Assist", html_no_slash)
 
 
 if __name__ == "__main__":

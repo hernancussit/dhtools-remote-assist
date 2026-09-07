@@ -163,9 +163,10 @@ class Plugin:
             url_prefix=url_prefix,
             template_folder=os.path.join(self.plugin_dir, "templates"),
             static_folder=os.path.join(self.plugin_dir, "static"),
-            static_url_path=f"{url_prefix}/static",
+            static_url_path="/static",
         )
 
+        @bp.route("", methods=["GET"])
         @bp.route("/", methods=["GET"])
         def dashboard():
             owner = self.config.get("presets", {}).get("owner_username", "admin")
@@ -191,7 +192,7 @@ class Plugin:
             }
 
             return render_template(
-                "index.html",
+                "remote_assist/index.html",
                 status=status_summary,
                 config=self.config,
                 telegram_conf=tg_conf,
