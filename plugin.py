@@ -136,6 +136,17 @@ class Plugin:
         else:
             logger.info("Bot de Telegram deshabilitado o sin token.")
 
+    def restart_server(self, delay: float = 1.5) -> bool:
+        """Requests graceful dHtools service restart via SDK if supported by manager."""
+        if self.manager and hasattr(self.manager, "restart_process"):
+            try:
+                self.manager.restart_process(delay=delay)
+                logger.info("Reinicio del servicio dHtools solicitado vía SDK (delay=%ss).", delay)
+                return True
+            except Exception as e:
+                logger.warning("Error al solicitar reinicio al manager: %s", e)
+        return False
+
     # -------------------------------------------------------------
     # Hooks del Ciclo de Vida de dHtools
     # -------------------------------------------------------------
@@ -189,6 +200,7 @@ class Plugin:
                 "authorized_users_count": len(active_users),
                 "repository": self.metadata.get("repository", ""),
                 "branch": self.metadata.get("branch", "main"),
+                "can_restart": bool(self.manager and hasattr(self.manager, "restart_process")),
             }
 
             return render_template(
@@ -256,6 +268,18 @@ class Plugin:
         def api_reload():
             self.reload_config()
             return jsonify({"success": True, "message": "Configuración recargada."})
+
+        @bp.route("/api/restart", methods=["POST"])
+        def api_restart():
+            data = request.get_json(silent=True) or {}
+            delay = float(data.get("delay", 1.5))
+            ok = self.restart_server(delay=delay)
+            if ok:
+                return jsonify({"success": True, "message": f"Servicio dHtools reiniciándose en {delay}s..."})
+            return jsonify({
+                "success": False,
+                "message": "Método restart_process no disponible en la versión del Core activa."
+            }), 501
 
         @bp.route("/api/bot-config/save", methods=["POST"])
         def api_save_bot_config():

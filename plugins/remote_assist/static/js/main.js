@@ -322,4 +322,40 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
   }
+
+  // -------------------------------------------------------------
+  // 7. Reiniciar Servicio dHtools vía SDK
+  // -------------------------------------------------------------
+  const btnRestartServer = document.getElementById('btn-restart-server');
+  if (btnRestartServer) {
+    btnRestartServer.addEventListener('click', async () => {
+      if (!confirm('¿Deseas reiniciar el proceso de dHtools para refrescar módulos y plantillas en memoria?')) return;
+      const originalText = btnRestartServer.textContent;
+      btnRestartServer.disabled = true;
+      btnRestartServer.textContent = 'Reiniciando...';
+      try {
+        const resp = await fetch('/plugin/remote_assist/api/restart', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ delay: 1.5 }),
+        });
+        const data = await resp.json();
+        if (resp.ok && data.success) {
+          showToast('🔄 Reiniciando servidor dHtools... Espera 4 segundos.', 'info', 8000);
+          setTimeout(() => {
+            window.location.reload();
+          }, 3500);
+        } else {
+          showToast(`❌ ${data.message || 'No se pudo solicitar el reinicio'}`, 'error');
+          btnRestartServer.disabled = false;
+          btnRestartServer.textContent = originalText;
+        }
+      } catch (err) {
+        showToast('🔄 Reiniciando proceso... Recargando en breve.', 'info', 6000);
+        setTimeout(() => {
+          window.location.reload();
+        }, 3500);
+      }
+    });
+  }
 });

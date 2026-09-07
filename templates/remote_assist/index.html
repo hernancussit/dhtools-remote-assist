@@ -30,9 +30,14 @@
         </div>
         <div class="status-summary-pill">
           <span>Rama: <b>{{ status.branch }}</b></span>
-          <button id="btn-check-update" class="btn btn-outline" style="padding: 2px 8px; font-size: 0.75rem; margin-left: 6px;">
+          <button id="btn-check-update" class="btn btn-outline" style="padding: 2px 8px; font-size: 0.75rem; margin-left: 6px;" title="Comprobar actualizaciones en GitHub">
             🔄 Actualizaciones
           </button>
+          {% if status.can_restart %}
+          <button id="btn-restart-server" class="btn btn-outline" style="padding: 2px 8px; font-size: 0.75rem; margin-left: 4px; border-color: #f59e0b; color: #f59e0b;" title="Reiniciar servicio dHtools (SDK)">
+            ⚡ Reiniciar Core
+          </button>
+          {% endif %}
         </div>
       </div>
     </header>

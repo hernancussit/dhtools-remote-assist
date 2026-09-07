@@ -47,6 +47,12 @@ class MockPluginManager:
         self.cloud_plugin_instances = {
             "google_drive": MockCloudPlugin(),
         }
+        self.restart_called = False
+        self.restart_delay = None
+
+    def restart_process(self, delay: float = 1.5):
+        self.restart_called = True
+        self.restart_delay = delay
 
     def enqueue_download(
         self,
@@ -491,6 +497,36 @@ class TestRemoteAssistDelegatedAssistant(unittest.TestCase):
             self.assertEqual(resp_no_slash.status_code, 200)
             html_no_slash = resp_no_slash.get_data(as_text=True)
             self.assertIn("Asistente Delegado Remote Assist", html_no_slash)
+
+    def test_12_restart_process_sdk(self):
+        """Verifica que el método restart_server y el endpoint /api/restart invoquen self.manager.restart_process."""
+        mock_manager = MockPluginManager()
+        plugin = Plugin(manager=mock_manager, metadata={"id": "remote_assist", "version": "1.0.2"})
+
+        # Método directo
+        ok = plugin.restart_server(delay=2.0)
+        self.assertTrue(ok)
+        self.assertTrue(mock_manager.restart_called)
+        self.assertEqual(mock_manager.restart_delay, 2.0)
+
+        # Endpoint HTTP
+        app = Flask(__name__)
+        app.config["TESTING"] = True
+        plugin.register_routes(app)
+        client = app.test_client()
+
+        mock_manager.restart_called = False
+        resp = client.post("/plugin/remote_assist/api/restart", json={"delay": 3.0})
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertTrue(data.get("success"))
+        self.assertIn("3.0s", data.get("message"))
+        self.assertTrue(mock_manager.restart_called)
+        self.assertEqual(mock_manager.restart_delay, 3.0)
+
+        # Sin soporte en manager
+        plugin_no_manager = Plugin(manager=None, metadata={"id": "remote_assist", "version": "1.0.2"})
+        self.assertFalse(plugin_no_manager.restart_server())
 
 
 if __name__ == "__main__":

@@ -28,7 +28,8 @@ plugins/remote_assist/
 │   ├── channels.py             # Notificaciones multi-canal (Telegram, WhatsApp, Discord)
 │   └── cloud_uploader.py       # Integración oficial: upload_job_to_cloud y upload_file_to_cloud
 ├── templates/
-│   └── index.html              # Panel web: Configuración cifrada del bot, presets y lista blanca
+│   └── remote_assist/
+│       └── index.html          # Panel web: Configuración cifrada del bot, presets y lista blanca
 └── static/
     ├── css/style.css           # Estilos modernos Dark-Mode / Glassmorphism
     └── js/main.js              # Lógica para bot, guardar presets, generar links y revocar
@@ -108,13 +109,20 @@ El plugin inyecta un acceso directo en el sidebar de dHtools. Desde el panel pue
 
 ## 🧪 Pruebas Automatizadas
 
-Para validar toda la lógica de invitaciones, lista blanca, presets, cifrado seguro y descarga automática:
+Para validar toda la lógica de invitaciones, lista blanca, presets, cifrado seguro, templates aislados y reinicio vía SDK:
 ```bash
-python tests/test_plugin.py
+python -m unittest discover tests
 ```
 Resultado:
 ```text
-Ran 10 tests in 0.120s
+Ran 12 tests in 0.180s
 OK
 ```
+
+---
+
+## ⚡ Integración con dHtools SDK
+
+* **Reinicio Automático post-actualización:** Al actualizar desde el panel `/admin`, dHtools Core invoca automáticamente `restart_process_soon(1.5)` para recargar limpiamente todos los Blueprints y módulos en memoria.
+* **Control de reinicio desde el plugin:** Expone `POST /plugin/remote_assist/api/restart` y botón en la cabecera del panel para solicitar un reinicio ordenado del servicio mediante `self.manager.restart_process()`.
 
