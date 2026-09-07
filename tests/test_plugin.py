@@ -528,6 +528,59 @@ class TestRemoteAssistDelegatedAssistant(unittest.TestCase):
         plugin_no_manager = Plugin(manager=None, metadata={"id": "remote_assist", "version": "1.0.2"})
         self.assertFalse(plugin_no_manager.restart_server())
 
+    def test_13_session_user_and_clean_cloud_options(self):
+        """Verifica que el dashboard use la sesión activa para el dueño y formatee las nubes sin volcar diccionarios crudos."""
+        mock_manager = MockPluginManager()
+        # Simular retorno del SDK real de dHtools con objetos dict complejos
+        mock_manager.user_clouds["pedro"] = [
+            {
+                "id": "google_drive",
+                "name": "google drive",
+                "icon": "📁",
+                "enabled": False,
+                "auto_upload": False,
+                "status_label": "desactivado",
+            }
+        ]
+
+        app = Flask(__name__)
+        app.secret_key = "test_secret_key"
+        app.config["TESTING"] = True
+        plugin = Plugin(manager=mock_manager, metadata={"id": "remote_assist", "version": "1.0.3"})
+        plugin.register_routes(app)
+        client = app.test_client()
+
+        # Establecer sesión activa de pedro
+        with client.session_transaction() as sess:
+            sess["username"] = "pedro"
+
+        resp = client.get("/plugin/remote_assist/")
+        self.assertEqual(resp.status_code, 200)
+        html = resp.get_data(as_text=True)
+
+        # 1. Debe aparecer pedro en el campo de solo lectura
+        self.assertIn('value="pedro"', html)
+        self.assertIn("readonly", html)
+
+        # 2. El desplegable debe mostrar el icono y nombre legible, NO el diccionario crudo
+        self.assertIn("📁 Google Drive (Desactivado en dHtools)", html)
+        self.assertNotIn("{'id': 'google_drive'", html)
+
+        # 3. Al guardar presets, debe forzar el usuario de la sesión aunque envíen otro
+        save_resp = client.post(
+            "/plugin/remote_assist/api/presets/save",
+            json={
+                "owner_username": "atacante_intruso",
+                "default_quality": "720p",
+                "target_cloud": "google_drive",
+            },
+        )
+        self.assertEqual(save_resp.status_code, 200)
+        save_data = save_resp.get_json()
+        self.assertTrue(save_data["success"])
+        # El owner debe ser pedro (sesión activa), no el atacante
+        self.assertEqual(save_data["presets"]["owner_username"], "pedro")
+
 
 if __name__ == "__main__":
     unittest.main()

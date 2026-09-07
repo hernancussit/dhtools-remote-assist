@@ -10,7 +10,7 @@ import logging
 import threading
 from typing import Dict, Any, Optional, List
 import requests
-from flask import Blueprint, render_template, jsonify, request
+from flask import Blueprint, render_template, jsonify, request, session
 
 from .core.telegram_bot import TelegramBot
 from .core.channels import NotificationDispatcher
@@ -180,8 +180,18 @@ class Plugin:
         @bp.route("", methods=["GET"])
         @bp.route("/", methods=["GET"])
         def dashboard():
-            owner = self.config.get("presets", {}).get("owner_username", "admin")
-            available_clouds = self.cloud_uploader.get_user_providers(owner)
+            # Obtener usuario de la sesión activa en dHtools
+            current_username = (
+                getattr(request, "current_username", None)
+                or session.get("username")
+                or getattr(request, "current_user", {}).get("username", None)
+                or self.config.get("presets", {}).get("owner_username", "admin")
+            )
+
+            presets = self.config.setdefault("presets", {})
+            presets["owner_username"] = current_username
+
+            available_clouds = self.cloud_uploader.get_user_providers(current_username)
             users_list = self.access_manager.list_users()
             active_users = [u for u in users_list if u.get("status") == "active"]
 
@@ -209,7 +219,8 @@ class Plugin:
                 config=self.config,
                 telegram_conf=tg_conf,
                 masked_token=masked_token,
-                presets=self.config.get("presets", {}),
+                presets=presets,
+                current_username=current_username,
                 available_clouds=available_clouds,
                 authorized_users=users_list,
             )
@@ -249,8 +260,17 @@ class Plugin:
         def api_save_presets():
             data = request.get_json() or {}
             presets = self.config.setdefault("presets", {})
-            if "owner_username" in data:
-                presets["owner_username"] = str(data["owner_username"]).strip()
+
+            # Enlazar obligatoriamente al usuario conectado en la sesión activa
+            current_username = (
+                getattr(request, "current_username", None)
+                or session.get("username")
+                or getattr(request, "current_user", {}).get("username", None)
+                or str(data.get("owner_username", "")).strip()
+                or presets.get("owner_username", "admin")
+            )
+            presets["owner_username"] = current_username
+
             if "default_quality" in data:
                 presets["default_quality"] = str(data["default_quality"]).strip()
             if "default_format" in data:

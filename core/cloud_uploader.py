@@ -36,14 +36,41 @@ class CloudUploader:
     def update_config(self, new_config: Dict[str, Any]) -> None:
         self.config = new_config
 
-    def get_user_providers(self, username: str) -> List[str]:
-        """Queries active cloud storage providers for a specific dHtools user."""
+    def get_user_providers(self, username: str) -> List[Dict[str, Any]]:
+        """Queries and normalizes active cloud storage providers for a specific dHtools user."""
         if not self.manager or not hasattr(self.manager, "get_user_cloud_providers"):
             logger.warning("Manager no disponible o no implementa get_user_cloud_providers.")
             return []
         try:
-            providers = self.manager.get_user_cloud_providers(username)
-            return providers if isinstance(providers, list) else []
+            raw_providers = self.manager.get_user_cloud_providers(username)
+            if not isinstance(raw_providers, list):
+                return []
+            normalized = []
+            for item in raw_providers:
+                if isinstance(item, dict):
+                    pid = str(item.get("id") or item.get("plugin_id") or "").strip()
+                    name = str(item.get("name") or pid).strip()
+                    icon = str(item.get("icon") or "☁️").strip()
+                    enabled = bool(item.get("enabled", True))
+                    status_label = str(item.get("status_label") or ("activo" if enabled else "desactivado"))
+                    if pid:
+                        normalized.append({
+                            "id": pid,
+                            "name": name.replace("_", " ").title(),
+                            "icon": icon,
+                            "enabled": enabled,
+                            "status_label": status_label,
+                        })
+                elif isinstance(item, str) and item.strip():
+                    pid = item.strip()
+                    normalized.append({
+                        "id": pid,
+                        "name": pid.replace("_", " ").title(),
+                        "icon": "☁️",
+                        "enabled": True,
+                        "status_label": "activo",
+                    })
+            return normalized
         except Exception as e:
             logger.error("Error al consultar proveedores de nube para '%s': %s", username, e)
             return []
@@ -53,14 +80,18 @@ class CloudUploader:
         active_providers = self.get_user_providers(username)
 
         target_provider = provider
-        if not target_provider:
-            configured_target = self.config.get("cloud_upload", {}).get("target", "auto")
+        if not target_provider or target_provider == "auto":
+            presets_target = self.config.get("presets", {}).get("target_cloud")
+            cloud_conf_target = self.config.get("cloud_upload", {}).get("target", "auto")
+            configured_target = presets_target or cloud_conf_target
             if configured_target and configured_target != "auto":
                 target_provider = configured_target
             elif active_providers:
-                target_provider = active_providers[0]
+                # Priorizar proveedores activos / habilitados
+                enabled_pids = [p["id"] for p in active_providers if p.get("enabled", True)]
+                target_provider = enabled_pids[0] if enabled_pids else active_providers[0]["id"]
 
-        if not target_provider:
+        if not target_provider or target_provider == "auto":
             msg = f"El usuario '{username}' no tiene proveedores de nube activos en dHtools."
             return None, msg
 

@@ -58,8 +58,8 @@
         <form id="presets-form" class="presets-grid">
           <div class="form-group">
             <label for="owner_username">Usuario dHtools (Dueño de la nube)</label>
-            <input type="text" id="owner_username" class="form-control font-mono" value="{{ presets.owner_username or 'admin' }}" required>
-            <small>Las descargas y nubes se asignarán a esta cuenta.</small>
+            <input type="text" id="owner_username" class="form-control font-mono" value="{{ current_username }}" readonly style="cursor: not-allowed; opacity: 0.85; background: rgba(255, 255, 255, 0.05);" required>
+            <small>Vinculado automáticamente a tu sesión activa (<strong>{{ current_username }}</strong>).</small>
           </div>
 
           <div class="form-group">
@@ -85,12 +85,17 @@
           <div class="form-group">
             <label for="target_cloud">Nube Destino de Subida</label>
             <select id="target_cloud" class="form-control">
-              <option value="auto" {{ 'selected' if presets.target_cloud == 'auto' }}>Automático (Primer proveedor activo)</option>
+              <option value="auto" {{ 'selected' if (not presets.target_cloud or presets.target_cloud == 'auto') }}>Automático (Primer proveedor activo)</option>
               {% for cloud in available_clouds %}
-                <option value="{{ cloud }}" {{ 'selected' if presets.target_cloud == cloud }}>{{ cloud|capitalize }}</option>
+                <option value="{{ cloud.id }}" {{ 'selected' if presets.target_cloud == cloud.id }}>
+                  {{ cloud.icon }} {{ cloud.name }}{% if not cloud.enabled %} (Desactivado en dHtools){% endif %}
+                </option>
               {% endfor %}
             </select>
-            <small>{{ available_clouds|length }} proveedor(es) activo(s) en tu cuenta de dHtools.</small>
+            <small>
+              {% set active_count = available_clouds | selectattr('enabled') | list | length %}
+              {{ available_clouds|length }} proveedor(es) detectado(s) ({{ active_count }} activo(s)).
+            </small>
           </div>
 
           <div class="form-group full-width checkbox-row">

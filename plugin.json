@@ -1,7 +1,7 @@
 {
   "id": "remote_assist",
   "name": "Remote Assist",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "author": "dHtools / Private Plugin",
   "description": "Asistente remoto multi-plataforma (Telegram Bot, WhatsApp, Webhooks) con control interactivo, notificaciones de descargas y subida automática a la nube.",
   "icon": "📡",
